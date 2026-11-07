@@ -1,0 +1,9 @@
+# Python packages for the project's virtual environment (.venv).
+# Create it with system packages visible, so it reuses Debian's OpenCV and Tk:
+#   python3 -m venv --system-site-packages .venv
+#   .venv/bin/pip install -r requirements.txt
+mediapipe>=0.10
+bleak>=0.22
+pyserial>=3.5
+numpy
+pillow
