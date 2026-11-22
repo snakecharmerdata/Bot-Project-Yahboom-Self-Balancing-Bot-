@@ -1,0 +1,24 @@
+ Python
+.venv/
+__pycache__/
+*.pyc
+
+# Personal / device-specific settings (Bluetooth address, LiDAR port, ...)
+settings.json
+
+# Private data: photos from the camera and enrolled faces
+camera_snapshots/
+faces_db/
+
+# Local ESP32 Wi-Fi credentials
+esp32_lidar_bridge/wifi_secrets.h
+
+# Yahboom's factory firmware backup: their copyrighted code, keep it local
+firmware_backup/
+
+# Downloaded models (fetch with tools/download_models.sh)
+models/
+
+# Editor / tool folders
+.qodo/
+.vscode/
