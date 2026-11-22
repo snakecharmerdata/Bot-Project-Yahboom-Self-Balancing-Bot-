@@ -1,0 +1,74 @@
+==============================================
+  SELF BALANCING ROBOT: PARTS AND PRODUCTS
+==============================================
+
+HARDWARE
+--------
+  Qty  Item                                   What it's for
+  ---  -------------------------------------  ----------------------------------
+   1   Yahboom STM32 self-balancing robot     The robot itself. Includes the
+       (STM32F103RC board, Bluetooth module   motors, battery and Bluetooth
+       in UART3)                              module the Pi drives it through
+   1   Raspberry Pi 5                         The "brain": runs the app
+   1   Power supply for the Pi 5              Powers the Pi
+   1   microSD card with Raspberry Pi OS      The Pi's operating system
+       (Debian 13, 64-bit)
+   1   Screen, keyboard and mouse for the Pi  To use the app (or a remote desktop)
+   1   Yahboom ESP32-S3 ROS WiFi camera       Live video, sent over WiFi
+   1   Yahboom T-MINI-Plus LiDAR              Spinning laser distance sensor
+       (= YDLIDAR T-mini Plus)                for the radar map
+   1   ESP32 DevKit V1 board                  Sends the LiDAR data over WiFi
+   1   LiDAR adapter cable (white plug on     Connects the LiDAR to the ESP32
+       one end, loose wires on the other)
+   -   Jumper wires                           Connections between the boards
+   1   USB cable for the ESP32                Uploading its program (only needed
+                                              for programming)
+   1   Power bank (phone charger type),       Powers the ESP32 and the LiDAR on
+       5 V USB output                         the robot. One that doesn't switch
+                                              off at low current works best
+   1   CH340 USB-TTL adapter (with jumper     Setting up the camera's WiFi; also
+       for 3.3 V / 5 V)                       a spare wired LiDAR connection
+   1   3D-printed holder (our own design)     Holds the power bank and the ESP32
+                                              on the robot
+   1   WiFi router with 2.4 GHz and 5 GHz     Camera and ESP32 use 2.4 GHz; the
+       (or Ethernet for the Pi)               Pi uses 5 GHz or Ethernet
+
+
+SOFTWARE (all free)
+-------------------
+  On the Raspberry Pi:
+   - Raspberry Pi OS (Debian 13, 64-bit)
+   - Python 3 and our app (main.py and the project folder)
+   - Python libraries: mediapipe, bleak (Bluetooth), pyserial,
+     numpy, pillow, OpenCV, Tkinter
+   - Docker, which runs two ready-made programs:
+       * micro-ROS agent (image: microros/micro-ros-agent:humble)
+         receives the camera's pictures
+       * ROS 2 Humble (image: ros:humble-ros-base), which runs our
+         camera bridge that turns the pictures into a video stream
+   - VS Code (optional, for editing the code)
+   - Claude Code (optional, AI helper)
+
+  On a computer, for programming the ESP32:
+   - Arduino IDE with the "esp32" board package (by Espressif)
+   - Our sketch: esp32_lidar_bridge/esp32_lidar_bridge.ino
+
+  AI models (downloaded by tools/download_models.sh):
+   - MediaPipe gesture recognizer (Google): hand gestures
+   - YuNet face detector (OpenCV Zoo): finds faces
+   - SFace face recognizer (OpenCV Zoo): recognises who it is
+
+
+NOT NEEDED
+----------
+  - No changes to the robot's own software (factory firmware stays as-is)
+  - No ROS 2 installed directly on the Pi (Docker handles it)
+  - No soldering required if your boards come with pins attached
+
+
+TOOLS USED
+----------
+  - 3D printer (PLA or PETG) for the holder
+  - Drill, for cable and screw holes in the holder
+  - Small screwdriver / pliers (for the jumper cap and connectors)
+==============================================

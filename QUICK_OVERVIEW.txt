@@ -1,0 +1,102 @@
+==============================================
+  OUR SELF BALANCING ROBOT: THE SIMPLE VERSION
+==============================================
+
+WHAT IS IT?
+-----------
+A robot on two wheels that balances itself, like a Segway.
+A small computer (a Raspberry Pi) acts as its brain.
+On the Pi's screen we can:
+
+  - see what the robot sees (camera)
+  - see what is around it (a "radar" map)
+  - drive it with the keyboard
+  - let it follow a face, an object or a hand signal
+
+
+THE FOUR PARTS
+--------------
+1. THE ROBOT
+   Two wheels, a motor and a battery. It keeps itself standing up.
+
+2. THE CAMERA
+   A tiny camera on the robot. It sends pictures to the Pi over WiFi.
+
+3. THE LIDAR
+   A small spinning sensor on top. It uses a laser to measure how far
+   away things are, all the way around, many times a second.
+   (Like a bat using sound, but with light.)
+
+4. THE RASPBERRY PI
+   A small computer. It runs our app, shows everything on screen,
+   and tells the robot where to go.
+
+
+HOW DO THEY TALK? (NO WIRES!)
+-----------------------------
+
+   Pi  --- Bluetooth --->  Robot        "go forward", "turn left", "stop"
+   Camera --- WiFi --->  Pi             pictures
+   LiDAR --> mini board --- WiFi --->  Pi    distances
+
+  * Bluetooth is how the Pi sends driving orders. It's the same thing
+    your phone uses for wireless earbuds.
+  * WiFi carries the pictures and the distance readings.
+  * The LiDAR can't do WiFi on its own, so we added a tiny board
+    called an ESP32 (about the size of a stick of gum). It reads the
+    LiDAR through a few wires and passes the data on over WiFi.
+  * A power bank (the kind you charge your phone with) powers the
+    ESP32 and the LiDAR.
+
+
+WHAT WE ACTUALLY DID
+--------------------
+  1. Installed the app on the Raspberry Pi.
+  2. Told the camera the name of our WiFi network.
+  3. Paired the Pi with the robot over Bluetooth.
+  4. Wired the LiDAR to the ESP32 board (4 wires: 2 for power,
+     2 for data).
+  5. Put a small program on the ESP32 that sends the LiDAR data
+     over WiFi.
+  6. Told the app where to find the ESP32 on the network.
+  7. Opened the app, and everything showed up!
+
+
+WHAT THE APP CAN DO
+-------------------
+  Camera tab ..... live video from the robot
+  Drive tab ...... drive with buttons or arrow keys
+  LiDAR tab ...... a map of everything around the robot
+  Autopilot tab .. the robot follows a face, an object or your hand
+
+
+SAFETY: THE ROBOT IS SMART ABOUT STOPPING
+-----------------------------------------
+  * Let go of the key and the robot stops.
+  * Press SPACE or ESC to stop at any time.
+  * If the LiDAR sees something closer than 35 cm in front,
+    the robot refuses to drive into it.
+  * If the connection is lost, the robot stops by itself.
+  * Don't pick the robot up while it's balancing: the wheels
+    will spin fast!
+
+
+GOOD TO KNOW
+------------
+  * Turning the ESP32 off is fine. It remembers its program
+    and starts again by itself when you turn it back on.
+  * Keep the power bank charged. When it gets low, things act weird.
+  * Some words you'll hear:
+      WiFi / Bluetooth ... two kinds of wireless connection
+      ESP32 .............. a tiny, cheap computer board with WiFi
+      LiDAR .............. a laser distance sensor that spins
+      ROS 2 .............. software robots use to share information
+                           (our camera uses it to send pictures)
+      Raspberry Pi ....... a small computer the size of a deck of cards
+
+
+WANT MORE DETAIL?
+-----------------
+  docs/STUDENT_SETUP_GUIDE.txt ...... the full step-by-step setup
+  docs/CLAUDE_SETUP_INSTRUCTIONS.txt  give this to Claude for help
+==============================================
