@@ -9,19 +9,10 @@ and sends its data to the Pi over WiFi.
 ## How everything connects
 
 ```
-┌────────────── THE BOT (no cables leaving it) ──────────────┐
-│                                                            │
-│  Battery → Yahboom board ──5V/GND──► ESP32 ──► LiDAR        │
-│               │      │                  │                  │
-│        Bluetooth   Camera (UART2)       │                  │
-│        module                           │                  │
-└───────────┼──────────────┼──────────────┼──────────────────┘
-       Bluetooth         WiFi           WiFi
-       (driving)       (video)        (LiDAR)
-            ▼              ▼              ▼
-      ┌──────────────── Raspberry Pi ─────────────────┐
-      │  Drive · Camera · LiDAR map · Autopilot        │
-      └────────────────────────────────────────────────┘
+ESP32 DevKit V1 ──WiFi──► Raspberry Pi app
+      ▲
+      └── LiDAR (UART)
+      └── Regulated 5V supply
 ```
 
 | Signal | Travels by | Cable to the Pi? |
@@ -29,7 +20,7 @@ and sends its data to the Pi over WiFi.
 | Driving commands | Bluetooth (bot's module) | No |
 | Camera video | WiFi (camera's own ESP32-S3) | No |
 | LiDAR map | WiFi (new ESP32) | No |
-| Power | Bot's battery | No |
+| Power (bench test) | Separate regulated 5V supply | No |
 
 **Why a new ESP32:** the Yahboom board has no WiFi and never sends LiDAR data
 over Bluetooth. The camera has WiFi, but its software only sends images.
@@ -39,8 +30,7 @@ over Bluetooth. The camera has WiFi, but its software only sends images.
 ## Parts
 
 - [x] YDLIDAR T-mini Plus (Yahboom "T-MINI-Plus"), already have
-- [ ] ESP32 development board with pins pre-soldered, on order
-      (model: ____________; needed for the exact RX/TX pin numbers)
+- [x] ESP32 DevKit V1
 - [x] Adapter cable: white plug on one end, loose wire ends on the other
 - [x] Jumper wires
 - [x] USB cable for the ESP32 (for programming only)
@@ -48,66 +38,55 @@ over Bluetooth. The camera has WiFi, but its software only sends images.
 
 ---
 
-## Wiring (final, on the bot)
+## Wiring (wireless LiDAR test)
 
-> Switch the bot **off** before changing any wiring.
-> Wire by **function** (5V, GND, RX, TX), not by colour. This kit's camera cable
-> used non-standard colours.
-
-### Power: bot's UART3 port → ESP32
-
-Plug the adapter cable's white plug into the bot's **UART3** port (where the
-LiDAR used to plug in). Use **only** the 5V and GND wires.
-
-| Bot UART3 pin | → ESP32 pin |
-|---|---|
-| 5V | 5V (sometimes labelled VIN) |
-| GND | GND |
-| RX3 | **not connected**, tape the wire end |
-| TX3 | **not connected**, tape the wire end |
+Keep the bot disconnected while testing the wireless bridge. The project
+README identifies UART3 with the Bluetooth module, so do not use UART3 for
+ESP32 power or connect the LiDAR to UART3 at the same time as the ESP32.
+Use a single, regulated 5V supply for the ESP32 and LiDAR, with enough current
+for both. The LiDAR and ESP32 must share GND. Do not power the LiDAR from the
+Pi's USB port.
 
 ### LiDAR → ESP32
 
 | LiDAR wire | Function | → ESP32 pin |
 |---|---|---|
-| Red | 5V power | 5V / VIN |
+| Red | 5V power | Regulated 5V |
 | Black | Ground | GND |
-| Green | LiDAR TX (data out) | RX pin: ______ (filled in once the board model is known) |
-| Yellow | LiDAR RX (commands in) | TX pin: ______ (filled in once the board model is known) |
+| Green | LiDAR TX (data out) | GPIO16 / RX2 |
+| Yellow | LiDAR RX (commands in) | GPIO17 / TX2 |
 
-Both the ESP32 and the LiDAR use **3.3 V signals**, so they connect directly.
-
-### Unchanged
-
-- **Camera** stays on **UART2** (power only; it sends video over WiFi).
-- **Bluetooth module** stays in its socket (driving).
+The LiDAR uses 3.3V serial logic and 5V power. Do not connect its red power
+wire to the ESP32's 3.3V pin.
 
 ---
 
 ## Setup steps
 
 ### Step 1: Program the ESP32 (on the desk)
-1. Plug the ESP32 into the Pi with its **USB cable only**. Nothing else connected.
-2. Tell Claude the board model. Claude flashes the WiFi serial bridge firmware with:
-   - WiFi network: your **2.4 GHz** network (ESP32 boards only support 2.4 GHz)
-   - LiDAR serial: 230400 baud
-   - Bridge port: 8888 (planned)
-3. Note the ESP32's IP address: `_______________`
+1. In Arduino IDE, open `esp32_lidar_bridge/esp32_lidar_bridge.ino`.
+2. Select **ESP32 Dev Module** and the ESP32's USB serial port.
+3. In the sketch, enter the name and password of your **2.4 GHz** WiFi network
+   locally. Do not share or commit those credentials.
+4. Upload the sketch. Open Serial Monitor at **115200 baud** and note the IP
+   address printed after `Wi-Fi connected`. The bridge listens on TCP port
+   **8888**.
 
-### Step 2: Test on the desk (still powered by USB)
-1. Wire the LiDAR to the ESP32 as in the table above.
+### Step 2: Test on the desk
+1. With power disconnected, wire the LiDAR to the ESP32 as in the table above.
 2. Unplug the USB-TTL adapter from the Pi.
-3. In the app's settings, point the LiDAR at the ESP32 (Claude does this):
-   `settings.json` → `"lidar_port": "socket://<ESP32 IP>:8888"`
-4. Open the **LiDAR** tab and check the radar view appears.
+3. Power the ESP32 and LiDAR from a regulated 5V source that can supply both.
+   Do not connect the LiDAR's 5V to the Pi's USB power.
+4. Set `settings.json` to use the bridge:
+   `"lidar_port": "socket://<ESP32 IP>:8888"`
+5. Open the **LiDAR** tab and check the radar view appears.
 
-### Step 3: Move it onto the bot
-1. Switch the bot **off**.
-2. Mount the ESP32 and LiDAR on the bot.
-3. Connect power from the bot's **UART3** port (5V and GND only; tape RX3 and TX3).
-4. Unplug the ESP32's USB cable.
-5. Switch the bot **on**. The ESP32 joins WiFi and the LiDAR starts spinning.
-6. Check in the app: LiDAR map, camera, and driving all working with no cables.
+### Step 3: Mounting on the bot
+
+Do not connect the ESP32 to UART3 based on this guide. Verify the bot's actual
+UART3 pinout and power capability first; the README identifies UART3 with the
+Bluetooth module. Keep the ESP32 and LiDAR on their verified 5V supply, and
+leave the LiDAR's UART3 connection disconnected during wireless operation.
 
 ### Step 4: Line up "front"
 1. In the **LiDAR** tab, click **Rotate view 90°** until the side the bot faces
@@ -123,8 +102,9 @@ Both the ESP32 and the LiDAR use **3.3 V signals**, so they connect directly.
 - **The Pi must stay on 5 GHz WiFi** (or Ethernet). On 2.4 GHz the Pi's
   Bluetooth becomes unreliable. The ESP32 and camera use 2.4 GHz; that's fine,
   since only the Pi's own WiFi matters for Bluetooth.
-- **Power:** the bot's 5V now feeds the camera, the ESP32 and the LiDAR. If
-  anything restarts randomly, check power first.
+- **Power:** choose a verified 5V source rated for the ESP32 and LiDAR together.
+  Do not assume the bot's UART3 or an ESP32 VIN pin is suitable without checking
+  the board pinout and current rating.
 - **Obstacle stop** (Drive tab): stops forward or turning commands when something
   is within 0.35 m in front, and backward commands when something is within 0.35 m
   behind. Spinning on the spot is always allowed.
@@ -140,7 +120,7 @@ Both the ESP32 and the LiDAR use **3.3 V signals**, so they connect directly.
 | LiDAR tab says "Not connected" | Is the ESP32 powered? Is it on WiFi? Is `lidar_port` set to the ESP32's IP? |
 | LiDAR doesn't spin | 5V/GND on the ESP32, and red/black on 5V/GND |
 | Spins but no map | Green ↔ yellow swapped (green must go to the ESP32's RX pin) |
-| Map works on the desk but not on the bot | Bot power: 5V/GND from UART3 the right way round |
+| Map works on the desk but not on the bot | Check the verified 5V supply and WiFi signal |
 | Obstacle stop says "not protecting" | No fresh LiDAR data; see the rows above |
 | Driving stops working | Pi must be on 5 GHz WiFi; Bluetooth module still in its socket |
 
