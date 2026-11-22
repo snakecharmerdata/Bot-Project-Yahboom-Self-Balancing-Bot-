@@ -68,7 +68,10 @@ class CameraStream:
             recent = [t for t in self.recent if now - t < 3.0]
             if len(recent) < 2:
                 return 0.0
-            return (len(recent) - 1) / (recent[-1] - recent[0])
+            elapsed = recent[-1] - recent[0]
+            if elapsed <= 0.0:
+                return 0.0
+            return (len(recent) - 1) / elapsed
 
     def _run(self):
         while True:
@@ -88,9 +91,16 @@ class CameraStream:
                 return
             if not line.lower().startswith(b"content-length:"):
                 continue
-            length = int(line.split(b":")[1])
+            try:
+                length = int(line.split(b":", 1)[1].strip())
+            except ValueError:
+                continue
+            if length <= 0:
+                continue
             resp.readline()  # blank line after headers
             data = resp.read(length)
+            if len(data) < length:
+                return
             now = time.time()
             with self.lock:
                 self.jpeg = data
@@ -241,7 +251,10 @@ class App(tk.Tk):
         self.settings = settings.load()
         self.stream = CameraStream(BRIDGE_URL)
         self.lidar = TMiniLidar(self.settings["lidar_port"])
-        self.lidar.start()
+        try:
+            self.lidar.start()
+        except Exception:
+            pass
         self.guard = ObstacleGuard(self.lidar, self.settings)
         self.drive = BleDrive(self.settings["bot_ble_address"])
         self.drive.guard = self.guard
@@ -309,10 +322,12 @@ class App(tk.Tk):
             self.autopilot.drive_var.set(False)
 
     def on_close(self):
-        self.drive.stop()
+        if hasattr(self, "drive"):
+            self.drive.stop()
+            self.drive.disconnect()
         self.disable_autopilot_driving()
-        self.drive.disconnect()
-        self.lidar.stop()  # its worker sends the LiDAR's stop-scan command
+        if hasattr(self, "lidar"):
+            self.lidar.stop()  # its worker sends the LiDAR's stop-scan command
         self.after(400, self.destroy)  # give the workers time to send their final STOPs
 
     def restart_services(self):
