@@ -1,0 +1,245 @@
+=====================================================================
+  SELF BALANCING BOT: HOW THE WHOLE SYSTEM IS SET UP
+  Student guide (camera + ROS 2 + LiDAR + Bluetooth driving)
+=====================================================================
+
+WHAT WE BUILT
+-------------
+A Raspberry Pi 5 acts as the "brain" for a Yahboom self-balancing robot.
+The Pi runs one desktop app (main.py) with four tabs:
+
+  Camera     live video from a WiFi camera on the bot
+  Autopilot  face recognition, object following, hand gestures
+  Drive      drive the bot with buttons or keys, with obstacle stop
+  LiDAR      a 360-degree "radar" map of what is around the bot
+
+Nothing on the robot is plugged into the Pi. Everything is wireless:
+
+  Signal            How it travels                       Cable to Pi?
+  ----------------  -----------------------------------  ------------
+  Drive commands    Bluetooth LE (bot's BT module)       No
+  Camera video      WiFi (camera's own ESP32-S3 chip)    No
+  LiDAR map         WiFi (an extra ESP32 board we added) No
+
+We never changed the robot's factory software. The Pi sends the same
+Bluetooth commands that Yahboom's phone app sends.
+
+
+---------------------------------------------------------------------
+1. PARTS LIST
+---------------------------------------------------------------------
+  - Yahboom STM32 self-balancing robot
+      (STM32F103RC board, Bluetooth module plugged into UART3)
+  - Raspberry Pi 5, Raspberry Pi OS / Debian 13, 64-bit
+  - Yahboom ESP32-S3 ROS WiFi camera (talks micro-ROS over WiFi)
+  - Yahboom T-MINI-Plus LiDAR (same thing as a YDLIDAR T-mini Plus)
+  - ESP32 DevKit V1 board (for the wireless LiDAR bridge)
+  - CH340 USB-TTL adapter (used to set up the camera, and as a spare
+    wired LiDAR connection)
+  - Adapter cable for the LiDAR (white plug on one end, loose wires
+    on the other), jumper wires
+  - USB cable for programming the ESP32
+  - A regulated 5 V power supply strong enough for the ESP32 + LiDAR
+  - Software: Docker, Arduino IDE (with ESP32 board support),
+    Python 3, VS Code (optional)
+
+
+---------------------------------------------------------------------
+2. THE BIG PICTURE (how the pieces talk)
+---------------------------------------------------------------------
+
+  Robot (STM32) <------------ Bluetooth LE ------------------+
+                                                             |
+  Camera (ESP32-S3) --WiFi--> micro-ROS agent --> camera  ---+
+                              (Docker, UDP 9999)  bridge     |
+                                                  (Docker,   |
+                                                  port 8080) |
+                                                             |
+  LiDAR --wires--> ESP32 DevKit --WiFi (TCP 8888)------------+
+                                                             |
+                                                             v
+                                           Raspberry Pi 5: main.py
+
+Plain-English version:
+  * The CAMERA speaks ROS 2. It is a "micro-ROS" device, meaning a tiny
+    chip that cannot run full ROS 2 on its own. It sends its pictures to
+    a helper program on the Pi called the MICRO-ROS AGENT. The agent
+    turns them into a normal ROS 2 topic:
+        topic name:  /espRos/esp32camera
+        type:        sensor_msgs/CompressedImage (JPEG pictures)
+        ROS domain:  20
+  * Our CAMERA BRIDGE is a small ROS 2 program. It listens to that topic
+    and re-serves the pictures as an ordinary web video stream at
+        http://localhost:8080/stream
+    The app (and any web browser on the Pi) watches that stream.
+  * Both the agent and the bridge run inside DOCKER containers, so we
+    did not have to install ROS 2 on the Pi itself. They restart by
+    themselves when the Pi boots.
+  * The LIDAR spins and sends distance readings over a serial wire. The
+    ESP32 DevKit reads that wire and forwards the bytes over WiFi. The
+    app connects to the ESP32 and decodes the readings into a map.
+  * DRIVING uses Bluetooth LE. The app sends short text commands like
+    $1,0,0,0,0,0,0,0,0,0#  (= forward) ten times every second.
+
+
+---------------------------------------------------------------------
+3. THE ONE NETWORK RULE YOU MUST NOT FORGET
+---------------------------------------------------------------------
+The Pi 5's Bluetooth and WiFi share ONE radio chip. If the Pi is on
+2.4 GHz WiFi, the Bluetooth link to the bot drops within seconds.
+
+  -> Put the Pi on 5 GHz WiFi or, best of all, Ethernet.
+  -> The camera and the LiDAR ESP32 only work on 2.4 GHz WiFi. That
+     is fine. They just need to be on the same router as the Pi.
+
+Also give the Pi and the LiDAR ESP32 fixed IP addresses (a "DHCP
+reservation" in your router settings). The camera is told the Pi's IP,
+and the app is told the ESP32's IP. If those change, things go quiet.
+
+
+---------------------------------------------------------------------
+4. STEP 1: PREPARE THE PI
+---------------------------------------------------------------------
+  sudo apt update
+  sudo apt install -y git python3-venv python3-opencv python3-pil.imagetk python3-serial
+  sudo usermod -aG dialout $USER        # permission to use serial ports
+  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker $USER         # permission to use Docker
+
+Log out and back in (or reboot) so the new permissions apply.
+
+Copy the project folder onto the Pi, then inside it:
+
+  python3 -m venv --system-site-packages .venv
+  .venv/bin/pip install -r requirements.txt
+  tools/download_models.sh              # face + gesture models, ~46 MB
+
+
+---------------------------------------------------------------------
+5. STEP 2: THE CAMERA (ROS 2 over WiFi)
+---------------------------------------------------------------------
+a) Wire the camera to the USB-TTL adapter. Go BY FUNCTION, NOT BY
+   COLOUR (some kit cables use odd colours; read the labels on the
+   bot's camera port):
+       adapter 5V  -> camera 5V
+       adapter GND -> camera GND
+       adapter TXD -> camera RX
+       adapter RXD -> camera TX
+   Put the adapter's jumper on VCC-3V3 (the camera uses 3.3 V logic).
+
+b) Tell the camera your 2.4 GHz WiFi name/password and the Pi's IP:
+       python3 tools/camera_wifi_setup.py /dev/ttyUSB0
+   (The password prompt is hidden and is not saved anywhere.)
+
+c) Start the micro-ROS agent and the camera bridge:
+       docker run -d --name microros_agent --restart unless-stopped --net=host \
+         microros/micro-ros-agent:humble udp4 --port 9999
+       camera/start_bridge.sh
+
+d) Plug the camera back into the bot for power. Open
+   http://localhost:8080/stream in a browser on the Pi. You should see video.
+
+Check that both containers are running:  docker ps
+
+
+---------------------------------------------------------------------
+6. STEP 3: THE BOT (Bluetooth driving)
+---------------------------------------------------------------------
+  - On the bot's screen pick "1. Standard Mode", stand it up, and press
+    its start button. It only accepts drive commands while balancing.
+  - Disconnect any phone/tablet from the bot (only one connection at a time).
+  - The app finds the bot automatically (it looks for "YahBoom_BL" /
+    BLE service FFE0). If there are several nearby, put the address in
+    settings.json:   "bot_ble_address": "XX:XX:XX:XX:XX:XX"
+    (Find it with:  bluetoothctl  then  scan on)
+
+
+---------------------------------------------------------------------
+7. STEP 4: THE LIDAR, WIRELESS (ESP32 bridge)
+---------------------------------------------------------------------
+Why an extra ESP32? The robot's own board has no WiFi and never sends
+LiDAR data over Bluetooth. The camera has WiFi, but its software only
+sends pictures. So a cheap ESP32 rides along and forwards the LiDAR data.
+
+a) Program the ESP32 (on the desk, USB cable):
+   1. Create the file esp32_lidar_bridge/wifi_secrets.h with:
+          #pragma once
+          constexpr char WIFI_SSID[] = "YOUR_2.4GHZ_NETWORK";
+          constexpr char WIFI_PASSWORD[] = "YOUR_PASSWORD";
+      Never share or upload this file.
+   2. In Arduino IDE open esp32_lidar_bridge/esp32_lidar_bridge.ino
+   3. Board: "ESP32 Dev Module", pick its USB port, click Upload.
+   4. Open Serial Monitor at 115200 baud. Write down the IP address
+      printed after "Wi-Fi connected". The bridge uses TCP port 8888.
+
+b) Wire the LiDAR to the ESP32 (POWER OFF while wiring):
+       LiDAR Red    (5 V power)        -> regulated 5 V supply
+       LiDAR Black  (ground)           -> GND (shared with the ESP32)
+       LiDAR Green  (LiDAR TX, data)   -> ESP32 GPIO16 (RX2)
+       LiDAR Yellow (LiDAR RX, cmds)   -> ESP32 GPIO17 (TX2)
+   - The LiDAR needs 5 V POWER but uses 3.3 V SIGNALS. NEVER put the
+     red wire on the ESP32's 3.3 V pin.
+   - ESP32 and LiDAR MUST share ground.
+   - Do not power the LiDAR from the Pi's USB port.
+   - Do not hook anything to the bot's UART3 (that's the Bluetooth module).
+
+c) Point the app at the ESP32. In settings.json:
+       "lidar_port": "socket://<ESP32 IP>:8888"
+   (Our classroom bot used socket://10.0.0.186:8888)
+
+d) Open the LiDAR tab. The radar map should appear.
+
+e) Line up "front": click "Rotate view 90 deg" until the side the bot
+   faces is at the top. Obstacle stop uses the same "front".
+
+Fallback (wired): LiDAR -> USB-TTL adapter -> Pi USB.
+   Red->5V, Black->GND, Green->RXD, Yellow->TXD, jumper on VCC-3V3.
+   Set "lidar_port": null in settings.json and the app finds the adapter.
+
+
+---------------------------------------------------------------------
+8. STEP 5: RUN THE APP
+---------------------------------------------------------------------
+  .venv/bin/python main.py
+  ./install_launcher.sh        # optional desktop icon
+
+The status panel shows camera, bridge, micro-ROS agent and Bluetooth.
+
+
+---------------------------------------------------------------------
+9. SAFETY (read this before driving)
+---------------------------------------------------------------------
+  - Dead-man stop: the app resends the current command 10x per second,
+    and sends STOP if nothing renews it for 0.5 s (key released, link
+    lost, app frozen).
+  - SPACE or ESC = stop now (also turns off autopilot driving).
+  - Obstacle stop: blocks forward/turning if something is within
+    0.35 m in front (backward: behind). Spinning in place is allowed
+    so the bot can turn away. Only works when the LiDAR is ON the bot.
+  - Autopilot driving is OFF by default.
+  - Don't hold the bot in the air while it is balancing. The wheels
+    will run away.
+  - The app never opens the bot's own USB "burn" port (USB ID
+    1a86:7522), because opening it resets the bot.
+
+
+---------------------------------------------------------------------
+10. TROUBLESHOOTING
+---------------------------------------------------------------------
+  Bluetooth connects then drops ...... Pi on 2.4 GHz? Use 5 GHz/Ethernet
+  Bot ignores commands ............... Standard Mode? Start pressed?
+                                       Balancing? Phone disconnected?
+  No camera video .................... docker ps (agent + bridge up?)
+                                       Camera given the right Pi IP?
+                                       Power-cycle the camera
+  LiDAR "Not connected" .............. ESP32 powered and on WiFi?
+                                       lidar_port = correct ESP32 IP?
+  LiDAR doesn't spin ................. Red/black on 5 V/GND?
+  LiDAR spins but no map ............. Green/yellow swapped (green
+                                       must go to ESP32 RX = GPIO16)
+  Obstacle stop "not protecting" ..... No fresh LiDAR data, see above
+  Autopilot says it needs the Python
+  environment ........................ Start with .venv/bin/python main.py
+
+More detail: README.md and docs/wireless_lidar_setup.md
+=====================================================================

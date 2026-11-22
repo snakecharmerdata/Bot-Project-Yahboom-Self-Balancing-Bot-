@@ -1,0 +1,155 @@
+INSTRUCTIONS FOR CLAUDE: HELP A STUDENT SET UP THE SELF BALANCING BOT
+======================================================================
+
+HOW STUDENTS USE THIS FILE
+--------------------------
+Open Claude Code on your Raspberry Pi inside the project folder, then type:
+    Read docs/CLAUDE_SETUP_INSTRUCTIONS.txt and help me set up my bot.
+Everything below this line is written for Claude.
+
+----------------------------------------------------------------------
+
+ROLE
+----
+You are helping a student (a beginner) reproduce a working classroom
+setup on their own Raspberry Pi 5. Go one step at a time. Before each
+step, explain in one or two plain sentences what it does and why. After
+each step, verify it worked before moving on. Many steps are physical
+(wiring, pressing buttons). You cannot see the hardware, so ask the
+student to confirm and describe what they see. Never guess that a
+physical step succeeded.
+
+Start by checking where they are: run `ls`, check for `.venv`,
+`docker ps`, `cat settings.json`, and ask which parts they already have
+working. Skip finished steps.
+
+Reference docs in this project (read them when you need detail):
+  README.md, docs/wireless_lidar_setup.md, docs/STUDENT_SETUP_GUIDE.txt
+
+SYSTEM SUMMARY (verified working on the classroom bot, 2026-11-21)
+------------------------------------------------------------------
+Hardware:
+  - Yahboom STM32 self-balancing robot (STM32F103RC; Bluetooth LE module
+    in UART3). Factory firmware is NOT modified.
+  - Raspberry Pi 5, Raspberry Pi OS / Debian 13, 64-bit, Python 3.13
+  - Yahboom ESP32-S3 ROS WiFi camera (micro-ROS)
+  - Yahboom T-MINI-Plus LiDAR = YDLIDAR T-mini Plus (230400 baud,
+    3.3 V logic, 5 V power)
+  - ESP32 DevKit V1 as a WiFi-to-serial LiDAR bridge
+  - CH340 USB-TTL adapter (USB ID 1a86:7523)
+
+Data paths:
+  - Drive: Pi --BLE--> bot. Service FFE0, characteristic FFE1. Text
+    frames "$A,B,0,0,0,0,0,0,0,0#" (A: 0 stop, 1 fwd, 2 back, 3 left,
+    4 right; B: 1 spin left, 2 spin right), written in chunks of 20 bytes
+    or less, resent every 0.1 s, auto STOP after 0.5 s with no renewal.
+    Code: bot/drive.py
+  - Camera: ESP32-S3 --WiFi/UDP 9999--> micro-ROS agent (Docker image
+    microros/micro-ros-agent:humble, --net=host) --> ROS 2 topic
+    /espRos/esp32camera (sensor_msgs/CompressedImage), ROS_DOMAIN_ID=20
+    --> camera bridge (Docker ros:humble-ros-base running
+    camera/bridge.py, started by camera/start_bridge.sh) --> HTTP on
+    port 8080: /stream (MJPEG), /snapshot.jpg, /status (JSON).
+    The app reads http://localhost:8080/stream.
+  - LiDAR: T-mini Plus --UART2 (GPIO16 RX2 / GPIO17 TX2, 230400)-->
+    ESP32 DevKit running esp32_lidar_bridge/esp32_lidar_bridge.ino, a
+    raw two-way TCP relay on port 8888 --WiFi--> app.
+    settings.json "lidar_port": "socket://<ESP32 IP>:8888".
+    null = wired USB-TTL adapter, found automatically by USB ID.
+    Code: lidar/tmini.py (decoder), lidar/guard.py (obstacle stop)
+
+Settings file (settings.json, not in git, per-device):
+  { "bot_ble_address": null, "lidar_rotation": 0,
+    "lidar_port": "socket://<ESP32 IP>:8888",
+    "obstacle_stop": true, "obstacle_stop_mm": 350 }
+
+SETUP ORDER
+-----------
+1. System packages:
+     sudo apt update
+     sudo apt install -y git python3-venv python3-opencv python3-pil.imagetk python3-serial
+     sudo usermod -aG dialout $USER
+     curl -fsSL https://get.docker.com | sudo sh
+     sudo usermod -aG docker $USER
+   Then the student must log out/in or reboot. Check with `groups`.
+
+2. Python environment (in the project folder):
+     python3 -m venv --system-site-packages .venv
+     .venv/bin/pip install -r requirements.txt
+     tools/download_models.sh
+   --system-site-packages is required (reuses Debian's OpenCV and Tk).
+
+3. Network check. Run `iw dev wlan0 link` and/or `ip addr`. The Pi must
+   be on 5 GHz WiFi or Ethernet: Pi 5 Bluetooth and WiFi share one radio,
+   and on 2.4 GHz the BLE link to the bot drops. The ESP32s use 2.4 GHz
+   on the same router. Recommend DHCP reservations for the Pi and the
+   LiDAR ESP32.
+
+4. Camera:
+   a. Wiring to the USB-TTL adapter by FUNCTION, not colour: 5V-5V,
+      GND-GND, adapter TXD -> camera RX, adapter RXD -> camera TX,
+      jumper on VCC-3V3. Have the student read the port labels aloud.
+   b. python3 tools/camera_wifi_setup.py /dev/ttyUSB0
+      (the student types the WiFi password themselves; it is not saved)
+   c. docker run -d --name microros_agent --restart unless-stopped --net=host \
+        microros/micro-ros-agent:humble udp4 --port 9999
+      camera/start_bridge.sh
+   d. Verify: docker ps shows both containers;
+      curl -s http://localhost:8080/status shows frames increasing.
+
+5. Bot Bluetooth: student sets Standard Mode, stands bot up, presses
+   start; disconnects phone. Optionally test with tools/ble_drive_test.py
+   (wheels off the ground NOT allowed while balancing; keep clear space).
+   If there are several BLE devices nearby, find "YahBoom_BL" with
+   bluetoothctl / scan on and set bot_ble_address.
+
+6. Wireless LiDAR:
+   a. Have the student create esp32_lidar_bridge/wifi_secrets.h:
+        #pragma once
+        constexpr char WIFI_SSID[] = "...";
+        constexpr char WIFI_PASSWORD[] = "...";
+      The student types the credentials. Do not ask for, echo, log or
+      store their password, and do not print this file after it's filled.
+   b. Arduino IDE (or arduino-cli with the esp32 core): board "ESP32 Dev
+      Module", upload. Serial Monitor 115200 shows the IP after
+      "Wi-Fi connected".
+   c. Wiring, POWER OFF first: Red -> regulated 5 V, Black -> GND
+      (shared with ESP32), Green (LiDAR TX) -> GPIO16, Yellow (LiDAR RX)
+      -> GPIO17. Never red to 3.3 V. Not from the Pi's USB. Nothing on
+      the bot's UART3.
+   d. Test reachability: nc -zv <ESP32 IP> 8888
+   e. Set lidar_port in settings.json to socket://<ESP32 IP>:8888.
+   f. Run the app, open the LiDAR tab, use "Rotate view 90" until the
+      bot's front is at the top.
+
+7. Run: .venv/bin/python main.py   Optional: ./install_launcher.sh
+
+HARD RULES FOR CLAUDE
+---------------------
+- NEVER open, flash or probe the serial device with USB ID 1a86:7522.
+  That is the bot's own "burn" port, and opening it resets the bot. Only
+  the CH340 adapter 1a86:7523 is safe. Check with `lsusb` and
+  `ls -l /dev/serial/by-id/`.
+- Do not modify or reflash the bot's STM32 firmware.
+- Do not commit, print, upload or paste WiFi passwords, wifi_secrets.h,
+  settings.json, camera_snapshots/ or faces_db/ (all are in .gitignore).
+- Before any step that powers hardware, have the student re-check the
+  wiring against the table and confirm out loud.
+- Don't run anything that makes the bot move until the student confirms
+  it is on the floor with clear space, and remind them SPACE/ESC stops it.
+- Keep explanations short and friendly. Many students are new to Linux,
+  so explain what each command is for.
+
+TROUBLESHOOTING MAP
+-------------------
+  BLE connects then drops     -> Pi on 2.4 GHz; move to 5 GHz/Ethernet
+  Bot ignores commands        -> not in Standard Mode / not balancing /
+                                 phone still connected
+  No video                    -> docker ps; docker logs microros_agent;
+                                 docker logs camera_bridge; wrong Pi IP
+                                 given to camera; power-cycle camera
+  LiDAR "Not connected"       -> ESP32 power/WiFi; wrong IP in
+                                 lidar_port; nc -zv <ip> 8888
+  LiDAR spins, no map         -> green/yellow swapped
+  LiDAR doesn't spin          -> 5 V / GND wiring or weak supply
+  Autopilot needs environment -> launch with .venv/bin/python
